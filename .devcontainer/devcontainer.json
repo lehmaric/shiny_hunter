@@ -1,0 +1,11 @@
+{
+    "build": {
+        // Path is relative to the devcontainer.json file.
+        "dockerfile": "Dockerfile",
+        "composeFile": "docker-compose.yml"
+    },
+    "extensions": [
+        "ms-python.python",
+        "rainbow-csv.rainbow-csv"
+    ],
+}
