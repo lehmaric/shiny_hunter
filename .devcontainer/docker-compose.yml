@@ -1,8 +1,17 @@
 version: '3.8'
+
 services:
   devcontainer:
-    dockerfile: Dockerfile
+    build:
+      context: ..
+      dockerfile: ./.devcontainer/Dockerfile
+    devices:
+      - /dev/hci0:/dev/hci0
     volumes:
       - ../..:/workspaces:cached
       - ~/.ssh:/root/.ssh:ro
+      - /var/run/dbus:/var/run/dbus
+      - /run/dbus:/run/dbus
     command: sleep infinity
+    privileged: true
+    network_mode: host 

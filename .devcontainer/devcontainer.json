@@ -1,11 +1,16 @@
 {
-    "build": {
-        // Path is relative to the devcontainer.json file.
-        "dockerfile": "Dockerfile",
-        "composeFile": "docker-compose.yml"
-    },
-    "extensions": [
-        "ms-python.python",
-        "rainbow-csv.rainbow-csv"
-    ],
+    // Path is relative to the devcontainer.json file.
+    "name": "shiny_hunter",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "devcontainer",
+    "workspaceFolder": "/workspaces/shiny_hunter",
+    "shutdownAction": "stopCompose",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "rainbow-csv.rainbow-csv"
+            ]
+        }
+    }
 }
