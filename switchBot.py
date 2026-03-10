@@ -2,8 +2,8 @@
 import subprocess
 import time
 import random
-import nxbt
-from nxbt import Buttons, Sticks
+import nuxbt
+from nuxbt import Buttons, Sticks
 import cv2
 import datetime
 import subprocess
@@ -18,29 +18,29 @@ import os
 import signal
 
 BUTTONS = {
-    "a": nxbt.Buttons.A,
-    "b": nxbt.Buttons.B,
-    "x": nxbt.Buttons.X,
-    "y": nxbt.Buttons.Y,
-    "plus": nxbt.Buttons.PLUS,
-    "minus": nxbt.Buttons.MINUS,
-    "home": nxbt.Buttons.HOME,
-    "capture": nxbt.Buttons.CAPTURE,
-    "l": nxbt.Buttons.L,
-    "r": nxbt.Buttons.R,
-    "zl": nxbt.Buttons.ZL,
-    "zr": nxbt.Buttons.ZR,
-    "up": nxbt.Buttons.DPAD_UP,
-    "down": nxbt.Buttons.DPAD_DOWN,
-    "left": nxbt.Buttons.DPAD_LEFT,
-    "right": nxbt.Buttons.DPAD_RIGHT
+    "a": nuxbt.Buttons.A,
+    "b": nuxbt.Buttons.B,
+    "x": nuxbt.Buttons.X,
+    "y": nuxbt.Buttons.Y,
+    "plus": nuxbt.Buttons.PLUS,
+    "minus": nuxbt.Buttons.MINUS,
+    "home": nuxbt.Buttons.HOME,
+    "capture": nuxbt.Buttons.CAPTURE,
+    "l": nuxbt.Buttons.L,
+    "r": nuxbt.Buttons.R,
+    "zl": nuxbt.Buttons.ZL,
+    "zr": nuxbt.Buttons.ZR,
+    "up": nuxbt.Buttons.DPAD_UP,
+    "down": nuxbt.Buttons.DPAD_DOWN,
+    "left": nuxbt.Buttons.DPAD_LEFT,
+    "right": nuxbt.Buttons.DPAD_RIGHT
 }
 
 """GLOBALS"""
 QUITTING = False
 
-# Initialize NXBT
-nx = nxbt.Nxbt()
+# Initialize nuxbt
+nx = nuxbt.Nuxbt()
 controller_idx = None
 
 #Stream Settings
@@ -270,7 +270,7 @@ def CreateController():
 
 	# Create Pro Controller
 	idx = nx.create_controller(
-		nxbt.PRO_CONTROLLER,
+		nuxbt.PRO_CONTROLLER,
 		adapter_path=adapter,
 		colour_body=RandomColour(),
 		colour_buttons=[255, 255, 255]
@@ -290,7 +290,7 @@ def ReconnectController():
 	print("Reconnecting")
 	# Reconnect Pro Controller
 	new_idx = nx.create_controller(
-		nxbt.PRO_CONTROLLER,
+		nuxbt.PRO_CONTROLLER,
 		reconnect_address=nx.get_switch_addresses()
 	)
 	nx.wait_for_connection(new_idx)
