@@ -103,27 +103,18 @@ def StartCapture():
 
 		command = [
 			"ffmpeg",
-			"-rtsp_transport", "tcp",
-			"-fflags", "nobuffer+discardcorrupt",
+			"-fflags", "nobuffer",
 			"-flags", "low_delay",
-			"-reorder_queue_size", "0",
-			"-buffer_size", "1024000",
-			"-i", RTSP_URL,
-			# Rolling buffer — direct stream copy, no filter
-			"-map", "0:v",
-			"-c:v", "copy",
-			"-an",
-			"-f", "segment",
-			"-segment_time", "3",
-			"-segment_wrap", "5",
-			"-reset_timestamps", "1",
-			"-y", ROLLING_FILE,
-			# Preview — scaled + fps limited, raw pipe
-			"-map", "0:v",
+			"-thread_queue_size", "512",
+
+			"-f", "v4l2",
+			"-input_format", "mjpeg",
+			"-video_size", "1920x1080",
+			"-framerate", "60",
+			"-i", "/dev/video14",
+
 			"-vf", f"scale={FRAME_WIDTH}:{FRAME_HEIGHT},fps={PREVIEW_FPS}",
-			"-c:v", "rawvideo",
 			"-pix_fmt", "bgr24",
-			"-an",
 			"-f", "rawvideo",
 			"pipe:1",
 		]
@@ -524,7 +515,8 @@ def HuntShiny(sequence):
 	encounterCount = 1
 	while (foundShiny == False):
 		if (encounterCount % 100 == 0):
-			SaveGame();
+			# SaveGame();
+			pass
 		i = 0
 		while i < len(seq):
 			if (seq[i] == "loop"):
@@ -547,7 +539,7 @@ def HuntShiny(sequence):
 						if (encounterStarted == True):
 							break
 					loops += 1
-					if (loops > 40):
+					if (loops > 50):
 						print("Too many loops")
 						try:
 							controller_idx = ReconnectController()

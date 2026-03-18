@@ -7,6 +7,8 @@ services:
       dockerfile: ./.devcontainer/Dockerfile
     devices:
       - /dev/hci0:/dev/hci0
+      - /dev/video14:/dev/video14
+      - /dev/video15:/dev/video15
     volumes:
       - ../..:/workspaces:cached
       - ~/.ssh:/root/.ssh:ro
