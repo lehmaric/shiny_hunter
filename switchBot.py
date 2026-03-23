@@ -17,7 +17,7 @@ import sys
 import os
 import signal
 
-DEBUGGING = True
+DEBUGGING = False
 BUTTONS = {
     "a": nuxbt.Buttons.A,
     "b": nuxbt.Buttons.B,
@@ -595,7 +595,6 @@ def HuntShiny(sequence):
                 ResetPosition()
             else:
                 SequenceEvent(seq[i])
-            print("Check Debug")
             if DEBUGGING:
                 image = CaptureFrame()
                 SaveFrame(f"After_{seq[i]}",image, stamp = True)
