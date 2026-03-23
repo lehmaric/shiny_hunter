@@ -46,3 +46,19 @@ Loop control: loop, end. Use as loop left right end to walk left and right repea
 Events: encounter, check, battle, summary. Encounter scans for a black screen, check times the battle length for a shiny, battle scans if the battle menu has loaded, summarry looks at the Pokemon summary screen for the shiny star indicator.
 
 Floats: 0.5 for example adds a 0.5 second delay.
+
+
+### Debugging:
+v4l2-ctl --list-devices inside container should show something like:
+UGREEN 15389: UGREEN 15389 (usb-0000:00:14.0-1.1.3):
+        /dev/video14
+        /dev/video15
+        /dev/mediaH
+
+TODOs:
+- [ ] Dynamische Ermittlung des richtigen Devices mit hilfe von v4l2-ctl --list-devices
+- [ ] Die richtige Kommandosequenz für Nockchan rausfinden
+- [ ] Für das Debugging von Kommandosequenzen einen Stream aufmachen bei dem ich den Output anschauen kann
+- [ ] Refactoring: aufteilen in mehrere Codeteile anstatt nur eine gorße Main
+- [ ] print durch logging ersetzen
+- [ ] Der reset kommt manchmal nur in das Hauptmenü und manchmal bis zum startpunkt
