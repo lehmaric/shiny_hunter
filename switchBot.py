@@ -1,645 +1,528 @@
 #!/usr/bin/env python3
-import subprocess
+"""Nintendo Switch Shiny Hunter Bot - Main Entry Point"""
+import logging
+import signal
+import sys
 import time
-import random
-import nuxbt
-from nuxbt import Buttons, Sticks
-import cv2
+import threading
 import datetime
 import subprocess
-import csv
-import numpy as np
-import shlex
-import threading
-import collections
-import shutil
-import sys
-import os
-import signal
+from pathlib import Path
+from typing import Optional
 
-DEBUGGING = False
-BUTTONS = {
-    "a": nuxbt.Buttons.A,
-    "b": nuxbt.Buttons.B,
-    "x": nuxbt.Buttons.X,
-    "y": nuxbt.Buttons.Y,
-    "plus": nuxbt.Buttons.PLUS,
-    "minus": nuxbt.Buttons.MINUS,
-    "home": nuxbt.Buttons.HOME,
-    "capture": nuxbt.Buttons.CAPTURE,
-    "l": nuxbt.Buttons.L,
-    "r": nuxbt.Buttons.R,
-    "zl": nuxbt.Buttons.ZL,
-    "zr": nuxbt.Buttons.ZR,
-    "up": nuxbt.Buttons.DPAD_UP,
-    "down": nuxbt.Buttons.DPAD_DOWN,
-    "left": nuxbt.Buttons.DPAD_LEFT,
-    "right": nuxbt.Buttons.DPAD_RIGHT
-}
+import cv2
 
-"""GLOBALS"""
+from config import DEBUGGING, OUTPUT_DIR, DEBUG_DIR, Timings, SKIP_BLUETOOTH_SETUP
+from capture import FrameCaptureManager
+from controller import ControllerManager
+from processing import ImageAnalyzer
+from game import Sequence, SequenceLoader, GameMacroExecutor
+
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG if DEBUGGING else logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# Create output directories
+Path(OUTPUT_DIR).mkdir(exist_ok=True)
+Path(DEBUG_DIR).mkdir(exist_ok=True)
+
+# Global state
 QUITTING = False
+capture_manager: Optional[FrameCaptureManager] = None
+controller_manager: Optional[ControllerManager] = None
 
-# Initialize nuxbt
-nx = nuxbt.Nuxbt()
-controller_idx = None
+# ============================================================================
+# Capture Management
+# ============================================================================
 
-#Stream Settings
-RTSP_URL = "RTSP STREAM ADDRESS" #CHANGE THIS
+def start_capture() -> bool:
+    """Start video stream capture."""
+    global capture_manager
+    if capture_manager is None:
+        capture_manager = FrameCaptureManager()
+    return capture_manager.start()
 
-#Frame Reader
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 360
-PREVIEW_FPS = 12
-latest_frame	= None
-_process	= None
-_reader_thread	= None
-_reader_running	= False
-_frame_lock	= threading.Lock()
-_start_lock	= threading.Lock()
-_log_file	= None
 
-#Screenshots Folder
-OUTPUT_DIR = "screenshots"
-ROLLING_FILE = os.path.join(OUTPUT_DIR, "shinyFound%01d.ts")
+def stop_capture() -> None:
+    """Stop video stream capture."""
+    global capture_manager
+    if capture_manager:
+        capture_manager.stop()
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-"""Frame Reader Stuff"""
-def _read_exactly(pipe, n):
-    """Read exactly n bytes from pipe, returning bytes or None on EOF."""
-    buf = b""
-    while len(buf) < n:
-        try:
-            chunk = pipe.read(n - len(buf))
-        except (ValueError, OSError):
-            return None
-        if not chunk:
-            return None
-        buf += chunk
-    return buf
+def get_frame():
+    """Get latest captured frame."""
+    if capture_manager is None:
+        return None
+    return capture_manager.get_frame()
 
-def _frame_reader(process: subprocess.Popen):
-    global latest_frame, _reader_running
-    frame_size = FRAME_WIDTH * FRAME_HEIGHT * 3
-    print(f"[reader] started, expecting {frame_size} bytes per frame")
-    frames_read = 0
-    while _reader_running:
-        raw = _read_exactly(process.stdout, frame_size)
-        if raw is None:
-            print(f"[reader] EOF after {frames_read} frames")
-            break
-        frames_read += 1
-        frame = np.frombuffer(raw, np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH, 3))
-        with _frame_lock:
-            latest_frame = frame
-    print(f"[reader] thread exiting")
 
-def StartCapture():
-    """Start one FFmpeg process that feeds both the rolling buffer and the frame reader."""
-    global _process, _reader_thread, _reader_running, _log_file
-    with _start_lock:
-        if _process and _process.poll() is None:
-            return  # Already running
-
-        command = [
-            "ffmpeg",
-            "-fflags", "nobuffer",
-            "-flags", "low_delay",
-            "-thread_queue_size", "512",
-
-            "-f", "v4l2",
-            "-input_format", "mjpeg",
-            "-video_size", "1920x1080",
-            "-framerate", "60",
-            "-i", "/dev/video0",
-
-            "-vf", f"scale={FRAME_WIDTH}:{FRAME_HEIGHT},fps={PREVIEW_FPS}",
-            "-pix_fmt", "bgr24",
-            "-f", "rawvideo",
-            "pipe:1",
-        ]
-        _log_file = open("ffmpeg.log", "w")
-        _process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=_log_file,
-            stdin=subprocess.DEVNULL,
-            bufsize=0,
-        )
-
-        _reader_running = True
-        _reader_thread = threading.Thread(target=_frame_reader, args=(_process,), daemon=True)
-        _reader_thread.start()
-
-def StopCapture():
-    global _reader_running, _process, _reader_thread, _log_file
-    print("Stopping capture")
-    _reader_running = False
-
-    if _process:
-        _process.terminate()
-        try:
-            _process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            _process.kill()
-            _process.wait()
-        _process = None
-
-    if _reader_thread:
-        _reader_thread.join(timeout=3)
-        _reader_thread = None
-
-    if _log_file:
-        _log_file.close()
-        _log_file = None
-
-def CaptureFrame():
-    with _frame_lock:
-        return latest_frame.copy() if latest_frame is not None else None
-
-def Watchdog():
-    while True:
-        threading.Event().wait(10)
-        if _process is not None and _process.poll() is not None:
-            print("FFmpeg exited unexpectedly, restarting...")
-            StopCapture()
+def watchdog() -> None:
+    """Background thread to restart FFmpeg if it crashes."""
+    while not QUITTING:
+        time.sleep(10)
+        if capture_manager and not capture_manager.is_running():
+            logger.warning("FFmpeg crashed, restarting...")
+            stop_capture()
             time.sleep(2)
-            StartCapture()
+            start_capture()
 
-def WaitForFirstFrame(timeout=10):
-    """Block until the first frame arrives or timeout expires. Returns True if successful."""
-    start = time.time()
-    while time.time() - start < timeout:
-        with _frame_lock:
-            if latest_frame is not None:
-                return True
-        time.sleep(0.1)
-    return False
+# ============================================================================
+# Frame Saving
+# ============================================================================
 
-def SaveFrame(filename, frame = None, stamp=False):
-    if (frame is None):
-        frame = CaptureFrame()
+def save_frame(filename: str, frame=None, stamp: bool = False) -> None:
+    """Save a frame to disk.
+
+    Args:
+        filename: Base filename (without extension).
+        frame: Frame to save (uses latest if None).
+        stamp: Whether to add timestamp prefix.
+    """
+    if frame is None:
+        frame = get_frame()
 
     if frame is None:
-        print("NO FRAME DETECTED")
+        logger.error("No frame available to save")
         return
-    now = datetime.datetime.now()
-    if stamp:
-        filename = now.strftime("%Y-%m-%d_%H-%M-%S") + "_" + filename
-    if DEBUGGING:
-        path = f"screenshots/debug/{filename}.png"
-    else:
-        path = f"screenshots/{filename}.png"
-    cv2.imwrite(path, frame)
 
-def SaveHighlight():
-    StopCapture()
+    if stamp:
+        now = datetime.datetime.now()
+        filename = now.strftime("%Y-%m-%d_%H-%M-%S") + "_" + filename
+
+    if DEBUGGING:
+        path = f"{DEBUG_DIR}/{filename}.png"
+    else:
+        path = f"{OUTPUT_DIR}/{filename}.png"
+
+    cv2.imwrite(path, frame)
+    logger.debug(f"Saved frame: {path}")
+
+
+def save_highlight() -> None:
+    """Save recent video segment as highlight video."""
+    import subprocess
+    
+    logger.info("Saving highlight video...")
+    stop_capture()
     time.sleep(2)
 
     segments = [
-        os.path.join(OUTPUT_DIR, f)
-        for f in os.listdir(OUTPUT_DIR)
-        if f.startswith("shinyFound") and f.endswith(".ts")
+        f for f in Path(OUTPUT_DIR).iterdir()
+        if f.name.startswith("shinyFound") and f.name.endswith(".ts")
     ]
 
     if not segments:
-        print("No segments found")
+        logger.error("No video segments found")
         return
 
-    # Sort chronologically
-    segments.sort(key=lambda x: os.path.getmtime(x))
+    segments.sort(key=lambda x: x.stat().st_mtime)
 
-    CONCAT_PATH = os.path.join(OUTPUT_DIR, "concat.txt")
-    with open(CONCAT_PATH, "w") as f:
-        for s in segments:
-            f.write(f"file '{os.path.abspath(s)}'\n")
+    concat_path = Path(OUTPUT_DIR) / "concat.txt"
+    with open(concat_path, "w") as f:
+        for seg in segments:
+            f.write(f"file '{seg.absolute()}'\n")
 
     now = datetime.datetime.now()
-    filename = f"SHINY_{now.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
-    path = os.path.join("screenshots", filename)
-
-    subprocess.run([
-        "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", CONCAT_PATH,
-        "-c", "copy",
-        "-bsf:a", "aac_adtstoasc",
-        path
-    ])
-
-    print("Saved to", path)
-    StartCapture()
-    time.sleep(2)
-
-"""Controller stuff"""
-def SetupBluetooth():
-        # Restart Bluetooth
-        print("Restarting Bluetooth...")
-
-        subprocess.run(["sudo", "systemctl", "restart", "bluetooth"], check=True)
-
-        bt_commands = """
-        agent NoInputNoOutput
-        default-agent
-        power on
-        discoverable on
-        pairable on
-        exit
-        """
-
-        subprocess.run(["bluetoothctl"], input=bt_commands, text=True)
-        time.sleep(2)
-
-def CreateController():
-    # Get adapters
-    adapters = nx.get_available_adapters()
-    if not adapters:
-        raise RuntimeError("No Bluetooth adapters detected. Make sure Bluetooth is running and you have sudo privileges.")
-
-    adapter = adapters[0]
-    print("Using adapter:", adapter)
-
-    # Create Pro Controller
-    idx = nx.create_controller(
-        nuxbt.PRO_CONTROLLER,
-        adapter_path=adapter,
-        colour_body=RandomColour(),
-        colour_buttons=[255, 255, 255]
-    )
-    print(f"Controller created. Index: {idx}")
-
-    # Wait for Switch to connect (blocks indefinitely in 0.1.4)
-    print("Put your Switch in 'Pair New Controllers' mode now...")
-    nx.wait_for_connection(idx)
-    print("Controller connected!")
-    time.sleep(1)
-    return idx
-
-def ReconnectController():
-    DisconnectController()
-    time.sleep(3)
-    print("Reconnecting")
-    # Reconnect Pro Controller
-    new_idx = nx.create_controller(
-        nuxbt.PRO_CONTROLLER,
-        reconnect_address=nx.get_switch_addresses()
-    )
-    nx.wait_for_connection(new_idx)
-    print("Connected successfully")
-    return new_idx
-
-def DisconnectController():
-    global controller_idx
-    print("Disconnecting controller")
+    output_file = Path(OUTPUT_DIR) / f"SHINY_{now.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
 
     try:
-        nx.remove_controller(controller_idx)
-    except:
-        pass
+        subprocess.run([
+            "ffmpeg",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(concat_path),
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            str(output_file)
+        ], check=True)
+        logger.info(f"Highlight saved: {output_file}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to create highlight video: {e}")
 
-def RandomColour():
-        return [random.randint(0, 255) for _ in range(3)]
+    start_capture()
+    time.sleep(2)
 
-def PressButtons(inputs, delay=0.2):
-    global controller_idx
-    delay = max(float(delay), 0.2)
+# ============================================================================
+# Controller Management
+# ============================================================================
 
-    if isinstance(inputs, str):
-        inputs = [inputs]
-    nx.press_buttons(controller_idx, [BUTTONS[b] for b in inputs],0.4, block = False)
-    time.sleep(delay)
+def setup_controller() -> int:
+    """Initialize Bluetooth (if needed) and create controller.
 
-"""Nice Closing"""
-def QuitProgram():
+    Returns:
+        int: Controller index.
+
+    Raises:
+        RuntimeError: If setup fails.
+    """
+    global controller_manager
+    controller_manager = ControllerManager()
+    controller_manager.setup_bluetooth(skip=SKIP_BLUETOOTH_SETUP)
+    idx = controller_manager.create_controller()
+    return idx
+
+
+def disconnect_controller() -> None:
+    """Disconnect current controller."""
+    global controller_manager
+    if controller_manager:
+        controller_manager.disconnect_controller()
+
+
+def reconnect_controller() -> int:
+    """Reconnect to Switch after disconnection.
+
+    Returns:
+        int: New controller index.
+    """
+    global controller_manager
+    if controller_manager is None:
+        raise RuntimeError("Controller manager not initialized")
+    return controller_manager.reconnect_controller()
+
+# ============================================================================
+# Shutdown & Signals
+# ============================================================================
+
+def quit_program() -> None:
+    """Graceful shutdown."""
     global QUITTING
     if QUITTING:
         return
     QUITTING = True
-    print("Shutting down...")
-    StopCapture()
-    DisconnectController()
-    print("Goodbye")
+    logger.info("Shutting down...")
+
+    stop_capture()
+
+    # Full nuxbt cleanup to prevent atexit assertion error
+    if controller_manager:
+        controller_manager.cleanup()
+
+    logger.info("Goodbye")
     sys.exit(0)
 
-def OnExit(sig, frame):
-    QuitProgram()
 
-signal.signal(signal.SIGINT, OnExit)
-signal.signal(signal.SIGTERM, OnExit)
+def on_exit_signal(sig, frame):
+    """Handle interrupt signals."""
+    quit_program()
 
-"""Image Processing"""
-def CropFrame(image, xMin, xMax, yMin, yMax):
-    h, w = image.shape[:2]
-    x1 = int(w * xMin)
-    x2 = int(w * xMax)
-    y1 = int(h * yMin)
-    y2 = int(h * yMax)
-    croppedFrame = image[y1:y2, x1:x2]
-    return croppedFrame
 
-def ThresholdProcessing(image, threshMin=95):
-    # Convert to grayscale — white text will be brighter
-    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+signal.signal(signal.SIGINT, on_exit_signal)
+signal.signal(signal.SIGTERM, on_exit_signal)
 
-    # Normalize brightness and denoise
-    blurred = cv2.GaussianBlur(grey, (3, 3), 0)
-    # Threshold to isolate white text
-    _, binary = cv2.threshold(blurred, threshMin, 255, cv2.THRESH_BINARY)
-    # Morphological cleanup
-    kernel = np.ones((2, 2), np.uint8)
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
+# ============================================================================
+# Hunt Event Detection
+# ============================================================================
 
-    return cleaned
+def check_if_in_encounter(frame) -> bool:
+    """Detect if player is in active encounter.
 
-def ThresholdDetection(binaryMask, threshold):
-    whitePixels = cv2.countNonZero(binaryMask)
-    totalPixels = binaryMask.shape[0] * binaryMask.shape[1]
-    return ((whitePixels / totalPixels) > threshold)
+    Args:
+        frame: Current video frame.
 
-"""Sequences"""
-class Sequence:
-    def __init__(self, game, type, target, seq, block):
-        self.game = game #Game name
-        self.type = type #Type of hunt
-        self.target = target #Target Pokemon(not actually used anywhere whoops)
-        self.sequence = seq #Event sequence for hunt
-        self.block = block #Should it block any directions, in case of accidentally leaving grass patches
+    Returns:
+        bool: True if in encounter.
+    """
+    analyzer = ImageAnalyzer()
+    in_encounter = analyzer.check_encounter_in_progress(frame)
+    if in_encounter:
+        save_frame("encounter_original", frame)
+        save_frame("encounter_crop", analyzer.crop_frame(frame, *Timings.__dict__["CropRegions.ENCOUNTER_DETECTION"]))
+        logger.info("Encounter detected")
+    return in_encounter
 
-def LoadGame(game):
-    with open('sequences.csv', newline = '') as csvfile:
-        sequenceReader  = csv.DictReader(csvfile)
-        for row in sequenceReader:
-            if (row['game'] == game):
-                return row['game']
-    return False
 
-def LoadSequence(game, method):
-    with open('sequences.csv', newline = '') as csvfile:
-        sequenceReader = csv.DictReader(csvfile)
-        for row in sequenceReader:
-            if (row['game'] == game):
-                if (row['method'] == method):
-                    sequence = row['sequence'].split(" ")
-                    return sequence
-    return False
+def check_if_shiny_early(frame, gen: int = 3) -> bool:
+    """Detect shiny during early encounter animation.
 
-def SelectHunt():
-    StartGame()
-    game = LoadGame(input("Select Game: "))
-    while (game == False):
-        print("GAME NOT FOUND")
-        game = LoadGame(input("Select Game: "))
-    print(game, " loaded")
+    Args:
+        frame: Current frame.
+        gen: Game generation (3 or 4).
 
-    method = input("Select Method: ")
-    while (LoadSequence(game, method) == False):
-        method = input("Select Method: ")
-
-    target = input("Input Hunt Target: ")
-    sequence = LoadSequence(game, method)
-
-    block = input("Block direction?: ")
-    currentSequence = Sequence(game, method, target, sequence, block)
-    return currentSequence
-
-"""Sequence Event Checks"""
-def IsFloat(num):
-    try:
-        float(num)
-        return True
-    except ValueError:
-        return False
-
-def IsButton(button):
-    if button in BUTTONS:
-        return True
-    else:
-        return False
-
-def SequenceEvent(event):
-    if (IsButton(event)):
-        PressButtons([event], 0.1)
-
-    if (IsFloat(event)):
-        time.sleep(float(event))
-
-    if (event == "encounter"):
-        return IsInEncounter()
-
-    return False
-
-"""Basic macros for stuff"""
-def StartGame():
-    print("Loading game")
-    PressButtons("home", 0.75)
-    PressButtons("a", 0.5)
-    SaveFrame("game_loading")
-    time.sleep(1.5)
-
-def ResetPosition():
-    PressButtons(["a","b","x","y"], 4)
-    PressButtons("a", 2)
-    PressButtons("a", 2)
-    PressButtons("a", 3)
-    PressButtons("a", 3)
-    PressButtons("b", 2)
-    time.sleep(3)
-
-def SaveGame():
-    PressButtons("x", 1)
-    for i in range(4):
-        PressButtons("down", 0.5)
-    PressButtons("a", 1)
-    PressButtons("a", 1)
-    PressButtons("a", 2.5)
-    ResetPosition()
-
-"""Event checks"""
-def IsInEncounter():
-    image = CaptureFrame()
-    crop = CropFrame(image, 0.2, 0.8, 0.4, 0.6)
-    process = ThresholdProcessing(crop, 50)
-    #Check screen goes black
-    encounter = not ThresholdDetection(process, 0.1)
-    if (encounter):
-        SaveFrame("encounter_original", image)
-        SaveFrame("encounter_crop", crop)
-        SaveFrame("encounter_process", process)
-        print("Encounter Found")
-    return encounter
-
-def IsBattleLoaded(image):
-    crop = CropFrame(image, 0.54, 0.72, 0.80, 0.95)
-    process = ThresholdProcessing(crop, 120)
-    loaded = ThresholdDetection(process, 0.25)
-    if (loaded == True):
-        SaveFrame("battle", process)
-    return loaded
-
-def CheckEncounter():
-    print("Checking shiny")
-    delay = 2.4
-    #delay = 4.7
-    time.sleep(1)
-    SaveFrame("shiny_precheck")
-    time.sleep(delay - 1)
-    image = CaptureFrame()
-    SaveFrame("shiny_raw", image)
-    #Gen 3
-    crop = CropFrame(image, 0.2, 0.4, 0.75, 0.85)
-    #Gen 4
-    #crop = CropFrame(image, 0.15, 0.4, 0.25, 0.35)
-    SaveFrame("shiny_crop", crop)
-    process = ThresholdProcessing(crop, 130)
-    SaveFrame("shiny_check", process)
-    shiny = not ThresholdDetection(process, 0.015)
-    #Check shiny pokemon
+    Returns:
+        bool: True if shiny detected.
+    """
+    analyzer = ImageAnalyzer()
+    shiny = analyzer.check_shiny_early_detection(frame, gen)
+    if shiny:
+        save_frame("shiny_raw", frame, stamp=True)
+        logger.info("Shiny detected!")
     return shiny
 
-def CheckSummary():
-    image = CaptureFrame()
-    SaveFrame("shiny_raw", image)
-    crop = CropFrame(image, 0.435, 0.47, 0.215, 0.275)
-    process = ThresholdProcessing(crop, 240)
-    SaveFrame("star_threshold", process)
-    shiny = not ThresholdDetection(process, 0.8)
+
+def check_if_summary_shiny(frame) -> bool:
+    """Detect shiny on summary screen via star indicator.
+
+    Args:
+        frame: Current frame.
+
+    Returns:
+        bool: True if shiny star visible.
+    """
+    analyzer = ImageAnalyzer()
+    shiny = analyzer.check_shiny_summary_star(frame)
+    if not shiny:
+        logger.info("No shiny on summary")
     return shiny
 
-"""Main hunt"""
-def HuntShiny(sequence):
-    global controller_idx
-    seq = sequence.sequence
-    time.sleep(3)
 
-    foundShiny = False
-    encounterCount = 1
-    while (foundShiny == False):
-        i = 0
-        while i < len(seq):
-            if (seq[i] == "loop"):
-                endIndex = -1
-                for j in range(i, len(seq)):
-                    if (seq[j] == "end"):
-                        endIndex = j
-                        break
+def check_if_battle_loaded(frame) -> bool:
+    """Detect if battle interface has appeared.
 
-                if (endIndex == -1):
-                    return
-                encounterStarted = False
-                print("Looping Started")
-                loops = 0
-                while (encounterStarted == False):
-                    for l in range(i + 1, j):
-                        if (IsButton(seq[l]) and seq[l] == sequence.block):
-                            continue
-                        encounterStarted = SequenceEvent(seq[l])
-                        if (encounterStarted == True):
-                            break
-                    loops += 1
-                    if (loops > 50):
-                        print("Too many loops")
-                        try:
-                            controller_idx = ReconnectController()
-                            print(f"Reconnected! New controller index: {controller_idx}")
-                            time.sleep(2)
-                            ResetPosition()
-                            time.sleep(2)
-                            loops = 0
-                        except Exception as e:
-                            print(f"Reconnect failed: {e}")
-                            print("Restart program")
-                            QuitProgram()
-                print("Looping Ended")
-                loops = 0
-                i = endIndex
-                delay = 1.4
-                time.sleep(delay)
-                #Wait until encounter loads
-                encounterLoaded = False
-                print("Waiting For Encounter To Load")
-                while (encounterLoaded == False):
-                    image = CaptureFrame()
-                    crop = CropFrame(image, 0.4, 0.6, 0.4, 0.6)
-                    process = ThresholdProcessing(crop, 75)
-                    #Check screen goes black
-                    encounterLoaded = ThresholdDetection(process, 0.4)
-                    if (encounterLoaded):
-                        print("Encounter Loaded")
-                    time.sleep(0.02)
+    Args:
+        frame: Current frame.
 
-            elif (seq[i] == "battle"):
-                battleLoaded = False
-                time.sleep(3.5)
-                while (battleLoaded == False):
-                    image = CaptureFrame()
-                    battleLoaded = IsBattleLoaded(image)
-                    time.sleep(0.3)
-                print("Battle started")
-                time.sleep(0.1)
+    Returns:
+        bool: True if battle loaded.
+    """
+    analyzer = ImageAnalyzer()
+    return analyzer.check_battle_started(frame)
 
-            elif (seq[i] == "check"):
-                foundShiny = CheckEncounter()
-                if (not foundShiny):
-                    print("Shiny not found")
-            elif (seq[i] == "summary"):
-                foundShiny = CheckSummary()
-                if (not foundShiny):
-                    print("Shiny not found")
-            elif (seq[i] == "reset"):
-                ResetPosition()
-            else:
-                SequenceEvent(seq[i])
-            if DEBUGGING:
-                image = CaptureFrame()
-                SaveFrame(f"After_{seq[i]}",image, stamp = True)
-            if (foundShiny):
-                break
-            i += 1
-        if (foundShiny == True):
-            break
-        encounterCount += 1
-        print(encounterCount, " encounters")
+# ============================================================================
+# Hunt Sequence Selection
+# ============================================================================
 
-    print("SHINY FOUND AFTER ", encounterCount, " ENCOUNTERS")
-    SaveFrame("Shiny0", stamp = True)
-    time.sleep(0.2)
-    SaveFrame("Shiny1", stamp = True)
+def select_hunt() -> Sequence:
+    """Interactively select a game and hunt method.
 
-    #Disconnect Controller to allow player to catch
-    try:
-        nx.remove_controller(controller_idx)
-    except:
-        pass
-    time.sleep(2)
-    SaveHighlight()
-    caught = input("Type Y when shiny caught")
-    while (caught != "Y"):
-        caught = input("Type Y when shiny caught")
+    Returns:
+        Sequence: The selected hunt sequence.
 
-    ReconnectController()
+    Raises:
+        ValueError: If selection cannot be made.
+    """
+    loader = SequenceLoader("sequences.csv")
 
-def main():
-    global controller_idx
-    time.sleep(0.01)
-    controller_idx = CreateController()
-    PressButtons("a", 1)
-
-    StartCapture()
-    threading.Thread(target=Watchdog, daemon=True).start()
-
-    if not WaitForFirstFrame(timeout=10):
-        print("Stream failed, check ffmpeg.log")
-        QuitProgram()
-    else:
-        print("Frame stream ready.")
+    # Get available games
+    games = loader.get_available_games()
+    logger.info(f"Available games: {games}")
 
     while True:
-        time.sleep(0.01)
-        sequence = SelectHunt()
-        HuntShiny(sequence)
+        game = input("Select Game: ").strip()
+        if game in games:
+            break
+        logger.warning(f"Game '{game}' not found")
+
+    # Get available methods
+    methods = loader.get_available_methods(game)
+    logger.info(f"Available methods for {game}: {methods}")
+
+    while True:
+        method = input("Select Method: ").strip()
+        if method in methods:
+            break
+        logger.warning(f"Method '{method}' not found for {game}")
+
+    target = input("Hunt Target (Pokémon name): ").strip()
+    block_direction = input("Block direction (optional): ").strip() or None
+
+    # Load and return sequence
+    sequence = loader.load_sequence(game, method)
+    sequence.target = target
+    sequence.block_direction = block_direction
+
+    logger.info(f"Hunt selected: {game} / {method} targeting {target}")
+    return sequence
+
+
+# ============================================================================
+# Main Hunt Loop
+# ============================================================================
+
+def hunt_shiny(sequence: Sequence) -> None:
+    """Execute a hunt sequence until shiny is found.
+
+    Args:
+        sequence: Hunt sequence to execute.
+    """
+    global controller_manager
+
+    if controller_manager is None:
+        raise RuntimeError("Controller not initialized")
+
+    logger.info(f"Starting hunt: {sequence.method}")
+    time.sleep(3)
+
+    macros = GameMacroExecutor(controller_manager)
+    analyzer = ImageAnalyzer()
+
+    encounter_count = 1
+    shiny_found = False
+
+    while not shiny_found:
+        for event_idx, event in enumerate(sequence.events):
+            if event == "loop":
+                # Find matching end
+                end_idx = None
+                for j in range(event_idx, len(sequence.events)):
+                    if sequence.events[j] == "end":
+                        end_idx = j
+                        break
+
+                if end_idx is None:
+                    logger.error("Malformed sequence: 'loop' without 'end'")
+                    return
+
+                # Execute loop until encounter
+                loop_events = sequence.events[event_idx + 1 : end_idx]
+                encounter_started = False
+                max_loops = 50
+                loop_count = 0
+
+                while not encounter_started and loop_count < max_loops:
+                    for loop_event in loop_events:
+                        if loop_event == sequence.block_direction:
+                            continue  # Skip blocked directions
+
+                        if controller_manager._button_map.get(loop_event):
+                            controller_manager.press_buttons(loop_event, 0.1)
+                        else:
+                            try:
+                                delay = float(loop_event)
+                                time.sleep(delay)
+                            except ValueError:
+                                if loop_event == "encounter":
+                                    frame = get_frame()
+                                    encounter_started = check_if_in_encounter(frame)
+                                    if encounter_started:
+                                        break
+
+                        if encounter_started:
+                            break
+
+                    loop_count += 1
+
+                if loop_count >= max_loops:
+                    logger.warning("Max loops exceeded, attempting reconnect...")
+                    try:
+                        reconnect_controller()
+                        macros.reset_position()
+                        loop_count = 0
+                    except Exception as e:
+                        logger.error(f"Reconnect failed: {e}")
+                        quit_program()
+
+                # Wait for encounter to load with light indicators
+                time.sleep(Timings.ENCOUNTER_LOAD_WAIT_AFTER)
+                logger.debug("Encounter loaded, continuing...")
+
+            elif event == "battle":
+                logger.info("Waiting for battle UI...")
+                time.sleep(Timings.BATTLE_START_WAIT)
+                battle_loaded = False
+                while not battle_loaded:
+                    frame = get_frame()
+                    battle_loaded = check_if_battle_loaded(frame)
+                    time.sleep(Timings.BATTLE_CHECK_POLL_INTERVAL)
+                logger.info("Battle started")
+
+            elif event == "check":
+                time.sleep(Timings.ENCOUNTER_CHECK_INITIAL_WAIT)
+                save_frame("shiny_precheck")
+                time.sleep(Timings.ENCOUNTER_CHECK_DELAY - Timings.ENCOUNTER_CHECK_INITIAL_WAIT)
+                frame = get_frame()
+                shiny_found = check_if_shiny_early(frame, gen=3)
+                if not shiny_found:
+                    logger.info("Not shiny, continuing...")
+
+            elif event == "summary":
+                frame = get_frame()
+                shiny_found = check_if_summary_shiny(frame)
+                if not shiny_found:
+                    logger.info("Not shiny on summary, continuing...")
+
+            elif event == "reset":
+                macros.reset_position()
+
+            else:
+                # Treat as button or delay
+                if controller_manager._button_map.get(event):
+                    controller_manager.press_buttons(event, 0.1)
+                else:
+                    try:
+                        delay = float(event)
+                        time.sleep(delay)
+                    except ValueError:
+                        logger.warning(f"Unknown event: {event}")
+
+            if DEBUGGING:
+                frame = get_frame()
+                if frame is not None:
+                    save_frame(f"After_{event}", frame, stamp=True)
+
+            if shiny_found:
+                break
+
+        if shiny_found:
+            break
+
+        encounter_count += 1
+        logger.info(f"Encounter {encounter_count}, continuing...")
+
+    logger.info(f"SHINY FOUND AFTER {encounter_count} ENCOUNTERS!")
+    save_frame("Shiny0", stamp=True)
+    time.sleep(Timings.SHINY_FOUND_SCREENSHOT_1)
+    save_frame("Shiny1", stamp=True)
+
+    # Disconnect to allow player to catch
+    disconnect_controller()
+    time.sleep(Timings.SHINY_FOUND_CONTROLLER_DISCONNECT)
+
+    save_highlight()
+
+    while True:
+        caught = input("Type Y when shiny caught: ").strip().upper()
+        if caught == "Y":
+            break
+
+    reconnect_controller()
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def main() -> None:
+    """Main application loop."""
+    logger.info("Nintendo Switch Shiny Hunter starting...")
+    time.sleep(Timings.STARTUP_DELAY)
+
+    # Setup controller
+    try:
+        setup_controller()
+        controller_manager.press_buttons("a", 1)
+    except Exception as e:
+        logger.error(f"Controller setup failed: {e}")
+        quit_program()
+
+    # Start video capture
+    start_capture()
+    threading.Thread(target=watchdog, daemon=True).start()
+
+    if not capture_manager.wait_for_first_frame(Timings.FIRST_FRAME_TIMEOUT):
+        logger.error("Stream failed, check ffmpeg.log")
+        quit_program()
+    else:
+        logger.info("Video stream ready")
+
+    # Main hunt loop
+    while not QUITTING:
+        try:
+            time.sleep(Timings.STREAM_READY_WAIT)
+            sequence = select_hunt()
+            hunt_shiny(sequence)
+        except KeyboardInterrupt:
+            quit_program()
+        except Exception as e:
+            logger.error(f"Hunt error: {e}", exc_info=True)
+            if not input("Retry? (y/n): ").strip().lower().startswith("y"):
+                quit_program()
+
 
 if __name__ == "__main__":
     main()
+
