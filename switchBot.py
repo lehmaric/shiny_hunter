@@ -308,7 +308,7 @@ def PressButtons(inputs, delay=0.2):
 
     if isinstance(inputs, str):
         inputs = [inputs]
-    nx.press_buttons(controller_idx, [BUTTONS[b] for b in inputs], block = False)
+    nx.press_buttons(controller_idx, [BUTTONS[b] for b in inputs],0.4, block = False)
     time.sleep(delay)
 
 """Nice Closing"""
@@ -441,12 +441,12 @@ def StartGame():
 
 def ResetPosition():
     PressButtons(["a","b","x","y"], 4)
-    PressButtons("a", 1)
-    PressButtons("a", 1)
+    PressButtons("a", 2)
+    PressButtons("a", 2)
     PressButtons("a", 3)
     PressButtons("a", 3)
     PressButtons("b", 2)
-    time.sleep(5)
+    time.sleep(3)
 
 def SaveGame():
     PressButtons("x", 1)
@@ -517,9 +517,6 @@ def HuntShiny(sequence):
     foundShiny = False
     encounterCount = 1
     while (foundShiny == False):
-        if (encounterCount % 100 == 0):
-            # SaveGame();
-            pass
         i = 0
         while i < len(seq):
             if (seq[i] == "loop"):
