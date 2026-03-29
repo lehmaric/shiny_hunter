@@ -12,7 +12,10 @@ from typing import Optional
 
 import cv2
 
-from config import DEBUGGING, OUTPUT_DIR, DEBUG_DIR, Timings, SKIP_BLUETOOTH_SETUP
+from config import (
+    DEBUGGING, OUTPUT_DIR, DEBUG_DIR, Timings, SKIP_BLUETOOTH_SETUP,
+    LIVE_PREVIEW, PREVIEW_PORT, FRAME_WIDTH, FRAME_HEIGHT
+)
 from capture import FrameCaptureManager
 from controller import ControllerManager
 from processing import ImageAnalyzer
@@ -69,6 +72,57 @@ def watchdog() -> None:
             stop_capture()
             time.sleep(2)
             start_capture()
+
+
+# ============================================================================
+# Live Preview (MJPEG over HTTP)
+# ============================================================================
+
+def start_preview_server() -> None:
+    """Start a background HTTP server that streams MJPEG for live preview.
+
+    Access at http://localhost:{PREVIEW_PORT} in a browser.
+    """
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    class MJPEGHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                html = f"""
+                <html><head><title>SwitchBot Preview</title>
+                <style>body{{background:#111;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}}
+                img{{max-width:100%;height:auto;}}</style></head>
+                <body><img src="/stream" /></body></html>
+                """
+                self.wfile.write(html.encode())
+            elif self.path == "/stream":
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.end_headers()
+                while not QUITTING:
+                    frame = get_frame()
+                    if frame is not None:
+                        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                        try:
+                            self.wfile.write(b"--frame\r\n")
+                            self.wfile.write(b"Content-Type: image/jpeg\r\n\r\n")
+                            self.wfile.write(jpeg.tobytes())
+                            self.wfile.write(b"\r\n")
+                        except (BrokenPipeError, ConnectionResetError):
+                            break
+                    time.sleep(1.0 / 12)  # ~12 FPS
+            else:
+                self.send_error(404)
+
+        def log_message(self, format, *args):
+            pass  # Suppress HTTP logs
+
+    server = HTTPServer(("", PREVIEW_PORT), MJPEGHandler)
+    logger.info(f"Live preview available at http://localhost:{PREVIEW_PORT}")
+    server.serve_forever()
 
 # ============================================================================
 # Frame Saving
@@ -353,6 +407,7 @@ def hunt_shiny(sequence: Sequence) -> None:
     encounter_count = 1
     shiny_found = False
 
+    macros.start_game()
     while not shiny_found:
         for event_idx, event in enumerate(sequence.events):
             if event == "loop":
@@ -431,6 +486,7 @@ def hunt_shiny(sequence: Sequence) -> None:
 
             elif event == "summary":
                 frame = get_frame()
+                save_frame("shiny_summary", frame, stamp=False)
                 shiny_found = check_if_summary_shiny(frame)
                 if not shiny_found:
                     logger.info("Not shiny on summary, continuing...")
@@ -508,6 +564,10 @@ def main() -> None:
         quit_program()
     else:
         logger.info("Video stream ready")
+
+    # Start live preview if enabled
+    if LIVE_PREVIEW:
+        threading.Thread(target=start_preview_server, daemon=True).start()
 
     # Main hunt loop
     while not QUITTING:

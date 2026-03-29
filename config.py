@@ -65,6 +65,8 @@ FFMPEG_LOG_FILE = "ffmpeg.log"
 # ============================================================================
 DEBUGGING = False
 SKIP_BLUETOOTH_SETUP = False  # Set True to skip Bluetooth setup (dev without Bluetooth)
+LIVE_PREVIEW = True           # Enable live MJPEG preview via HTTP
+PREVIEW_PORT = 8765           # Port for live preview server
 
 # ============================================================================
 # CONTROLLER SETTINGS

@@ -9,6 +9,8 @@ services:
       - /dev/hci0:/dev/hci0
       - /dev/video14:/dev/video14
       - /dev/video15:/dev/video15
+    ports:
+      - "8765:8765"
     volumes:
       - ../..:/workspaces:cached
       - ~/.ssh:/root/.ssh:ro
