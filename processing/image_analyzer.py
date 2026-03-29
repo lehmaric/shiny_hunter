@@ -167,5 +167,5 @@ class ImageAnalyzer:
         """
         crop = ImageAnalyzer.crop_frame(image, *CropRegions.SUMMARY_STAR)
         binary = ImageAnalyzer.threshold_process(crop, ImageThresholds.SHINY_STAR)
-        star_visible = ImageAnalyzer.threshold_detect(binary, DetectionThresholds.SUMMARY_STAR_DETECTED)
+        star_visible = not ImageAnalyzer.threshold_detect(binary, DetectionThresholds.SUMMARY_STAR_DETECTED)
         return star_visible
