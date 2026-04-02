@@ -1,9 +1,8 @@
 game,method,sequence
 frlg,re,loop left encounter right encounter up encounter down encounter end check 0.2 a 0.1 a 3.6 down right down right a a 0.5 a 4
 frlg,starter, reset 0.5 a 1.5 a 1.5 a 0.5 a 2 b 2.8 b 2.8 b 0.5 b 0.5 b 0.5 b 0.5 b 3.7 x 0.5 a 1.7 a 0.5 a 3 summary
-frlg,nockchan, 1.0 reset a 2.0 a 2.5 b 1.0 x 0.5 down a 2.0 right 1.0 a 1.0 a 3 summary
+frlg,nockchan, 1.0 reset a a 2.0 a 2.9 b 1.1 x 1.0 down a 2.0 right  right 1.0 a 1.0 a 3 summary
 frlg,rattfratz, 1.0 reset x 0.5 down a 2.0 a 1.0 a 3 summary
-frlg,nockchan_old, reset 0.5 a 1.5 a 1.5 a 0.5 a 2 b 2.8 a 1.0 a 1.5 b 0.5 x 0.5 down a 1.7 right 1.0 a 1.0 a 3 summary
 rse,re,up encounter loop left encounter right encounter end check 1 a battle down right down a 1 a 2.8 
 dppt,re,up encounter loop left encounter right encounter end check 12 down down right right right left a 7
 

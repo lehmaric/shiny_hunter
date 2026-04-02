@@ -35,8 +35,14 @@ class GameMacroExecutor:
         logger.info("Resetting position...")
         self.controller.press_buttons(GameMacros.RESET_BUTTONS, Timings.RESET_POSITION_PHASE_1)
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_2)
+        self.controller.press_buttons("a", 0.1)
+
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_3)
+        self.controller.press_buttons("a", 0.1)
+
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_4)
+        self.controller.press_buttons("a", 0.1)
+
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_5)
         self.controller.press_buttons("b", Timings.RESET_POSITION_PHASE_6)
         time.sleep(Timings.RESET_POSITION_FINAL_WAIT)
