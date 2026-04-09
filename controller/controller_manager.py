@@ -8,7 +8,9 @@ from typing import Optional, List, Union
 import nuxbt
 from nuxbt import Buttons
 
-from config import ButtonType, BUTTON_PRESS_DURATION, MIN_BUTTON_DELAY, ControllerConfig
+from config import (
+    ButtonType, BUTTON_PRESS_DURATION, MIN_BUTTON_DELAY, ControllerConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +156,7 @@ exit
 
         Args:
             buttons: Single button name or list of button names.
-            delay: Delay in seconds after pressing (minimum 0.2s).
+            delay: Delay in seconds after pressing.
 
         Raises:
             ValueError: If button name is invalid.
@@ -176,10 +178,21 @@ exit
         # Apply minimum delay
         delay = max(float(delay), MIN_BUTTON_DELAY)
 
-        # Press buttons
+        # Press buttons (block=True waits for macro completion)
         self._nx.press_buttons(
-            self._controller_idx, button_codes, BUTTON_PRESS_DURATION, block=False
+            self._controller_idx, button_codes, BUTTON_PRESS_DURATION, block=True
         )
+
+        # Prune finished_macros to prevent unbounded IPC list growth
+        # which degrades the 132 Hz controller mainloop over time.
+        try:
+            ctrl_state = self._nx.manager_state[self._controller_idx]
+            finished = ctrl_state["finished_macros"]
+            if len(finished) > 20:
+                ctrl_state["finished_macros"] = finished[-5:]
+        except Exception:
+            pass
+
         time.sleep(delay)
         logger.debug(f"Pressed buttons: {buttons}")
 

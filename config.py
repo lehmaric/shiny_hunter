@@ -71,8 +71,8 @@ PREVIEW_PORT = 8765           # Port for live preview server
 # ============================================================================
 # CONTROLLER SETTINGS
 # ============================================================================
-BUTTON_PRESS_DURATION = 0.4
-MIN_BUTTON_DELAY = 0.2
+BUTTON_PRESS_DURATION = 0.2
+MIN_BUTTON_DELAY = 0.1
 DEFAULT_BUTTON_DELAY = 0.2
 
 # ============================================================================
