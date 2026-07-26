@@ -1,24 +1,29 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm
+FROM ghcr.io/astral-sh/uv:python3.12-trixie
 
-RUN mkdir -p /run/systemd/system/bluetooth.service.d/ && touch /run/systemd/system/bluetooth.service.d/nuxbt.conf && \
-	touch /etc/apt/sources.list.d/sid.list && echo "deb http://deb.debian.org/debian sid main" > /etc/apt/sources.list.d/sid.list
+# nuxbt needs bluetoothd started without the systemd sandboxing that blocks
+# raw HID access; an empty override file disables the upstream hardening.
+RUN mkdir -p /run/systemd/system/bluetooth.service.d/ && \
+	touch /run/systemd/system/bluetooth.service.d/nuxbt.conf
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# libgirepository-2.0-dev + libcairo2-dev are build deps for pygobject/pycairo,
+# which nuxbt pulls in to talk to BlueZ over D-Bus. pygobject >= 3.52 requires
+# girepository-2.0 (glib >= 2.80), which is why this image is trixie and not
+# bookworm (glib 2.74).
+RUN apt-get update && \
+	apt-get install -y --no-install-recommends \
 	curl \
 	git \
 	sudo \
 	bash \
 	build-essential \
 	cmake \
+	pkg-config \
 	libdbus-1-dev \
-	libdbus-glib-1-dev \ 
+	libdbus-glib-1-dev \
 	libbluetooth-dev \
 	bluez \
-	libdbus-glib-1-dev \
-	libdbus-1-dev \
 	libcairo2-dev \
 	libgirepository-2.0-dev \
-	pkg-config \
 	libgl1 \
 	ffmpeg \
 	v4l-utils \
