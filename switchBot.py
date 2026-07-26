@@ -8,7 +8,8 @@ import threading
 import datetime
 import subprocess
 from pathlib import Path
-from typing import Optional
+
+from numpy.typing import NDArray
 
 import cv2
 
@@ -34,8 +35,8 @@ Path(DEBUG_DIR).mkdir(exist_ok=True)
 
 # Global state
 QUITTING = False
-capture_manager: Optional[FrameCaptureManager] = None
-controller_manager: Optional[ControllerManager] = None
+capture_manager: FrameCaptureManager | None = None
+controller_manager: ControllerManager | None = None
 
 # ============================================================================
 # Capture Management
@@ -56,7 +57,7 @@ def stop_capture() -> None:
         capture_manager.stop()
 
 
-def get_frame():
+def get_frame() -> NDArray | None:
     """Get latest captured frame."""
     if capture_manager is None:
         return None
@@ -158,8 +159,6 @@ def save_frame(filename: str, frame=None, stamp: bool = False) -> None:
 
 def save_highlight() -> None:
     """Save recent video segment as highlight video."""
-    import subprocess
-    
     logger.info("Saving highlight video...")
     stop_capture()
     time.sleep(2)
