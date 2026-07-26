@@ -1,5 +1,6 @@
 """Game macro execution - pre-defined button sequences."""
 import logging
+import random
 import time
 from typing import TYPE_CHECKING
 
@@ -33,15 +34,17 @@ class GameMacroExecutor:
     def reset_position(self) -> None:
         """Execute full reset sequence to recover Pokémon to initial position."""
         logger.info("Resetting position...")
+        random_delay = round(random.uniform(0, 0.2), 3)
         self.controller.press_buttons(GameMacros.RESET_BUTTONS, Timings.RESET_POSITION_PHASE_1)
+        time.sleep(random_delay)
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_2)
-        self.controller.press_buttons("a", 0.1)
+        self.controller.press_buttons("a", random_delay)
 
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_3)
-        self.controller.press_buttons("a", 0.1)
+        self.controller.press_buttons("a", random_delay)
 
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_4)
-        self.controller.press_buttons("a", 0.1)
+        self.controller.press_buttons("a", random_delay )
 
         self.controller.press_buttons("a", Timings.RESET_POSITION_PHASE_5)
         self.controller.press_buttons("b", Timings.RESET_POSITION_PHASE_6)
