@@ -29,4 +29,14 @@ RUN apt-get update && \
 	v4l-utils \
 	&& rm -rf /var/lib/apt/lists/*
 
+# devcontainer-cli.nvim connects by running `nvim` inside the container, so the
+# binary has to exist here or the connect just exits. Installed from the
+# upstream release rather than left to the dotfiles bootstrap, which is not
+# reliable. Kept in step with the host version.
+ARG NVIM_VERSION=v0.12.4
+RUN curl -fsSL "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
+	| tar -xz -C /opt \
+	&& ln -s /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim \
+	&& nvim --version | head -1
+
 USER root

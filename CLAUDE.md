@@ -26,6 +26,8 @@ Debugging aids:
 
 Development happens in the devcontainer (`.devcontainer/`): a `uv` + Debian **trixie** image with `bluez`, `ffmpeg`, and `v4l-utils`, run `privileged` with host networking, the host D-Bus socket mounted, and `/dev/hci0` plus the capture card's video nodes passed through. nuxbt talks to BlueZ over D-Bus and needs all of that.
 
+The image also installs neovim, which is not a project dependency: `devcontainer-cli.nvim` connects by quitting the host editor and running `nvim` *inside* the container, so the binary has to be present or the connect silently collapses into "the editor just quit". Don't remove it as unused. It is pinned via the `NVIM_VERSION` build arg and should track the host version.
+
 The base image must stay on trixie or newer. nuxbt pulls in `pygobject`, which is sdist-only and builds against `girepository-2.0` requiring **glib >= 2.80**; bookworm ships glib 2.74, so a bookworm base cannot satisfy it. An earlier iteration tried to bridge that by adding Debian sid to `sources.list.d/` plus `apt-get dist-upgrade` and `--force-overwrite`; that mixed-suite setup broke and was removed. Do not reintroduce it — bump the base image instead. The relevant build deps are `libgirepository-2.0-dev` (note: *not* `libgirepository-1.0-dev`, which is the legacy introspection package and only needed by pygobject's test subproject) and `libcairo2-dev` for `pycairo`.
 
 `FFMPEG_INPUT_DEVICE` in `config.py` must match the device the capture card actually exposes, and that node must also be listed under `devices:` in `.devcontainer/docker-compose.yml`. These drift apart in practice — check both before debugging a "stream failed" error. Detecting the node automatically is an open TODO in `README.md`.
