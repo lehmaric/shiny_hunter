@@ -183,16 +183,6 @@ exit
             self._controller_idx, button_codes, BUTTON_PRESS_DURATION, block=True
         )
 
-        # Prune finished_macros to prevent unbounded IPC list growth
-        # which degrades the 132 Hz controller mainloop over time.
-        try:
-            ctrl_state = self._nx.manager_state[self._controller_idx]
-            finished = ctrl_state["finished_macros"]
-            if len(finished) > 20:
-                ctrl_state["finished_macros"] = finished[-5:]
-        except Exception:
-            pass
-
         time.sleep(delay)
         logger.debug(f"Pressed buttons: {buttons}")
 
