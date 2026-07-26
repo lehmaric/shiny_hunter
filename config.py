@@ -50,7 +50,7 @@ PREVIEW_FPS = 12
 FFMPEG_INPUT_FORMAT = "mjpeg"
 FFMPEG_INPUT_SIZE = "1920x1080"
 FFMPEG_INPUT_FPS = 60
-FFMPEG_INPUT_DEVICE = "/dev/video0"
+FFMPEG_INPUT_DEVICE = "/dev/video10"
 
 # ============================================================================
 # OUTPUT & LOGGING
