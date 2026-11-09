@@ -24,13 +24,15 @@ Debugging aids:
 
 ## Runtime environment
 
-Development happens in the devcontainer (`.devcontainer/`): a `uv` + Debian **trixie** image with `bluez`, `ffmpeg`, and `v4l-utils`, run `privileged` with host networking, the host D-Bus socket mounted, and `/dev/hci0` plus the capture card's video nodes passed through. nuxbt talks to BlueZ over D-Bus and needs all of that.
+Development happens in the devcontainer (`.devcontainer/`): a `uv` + Debian **trixie** image with `bluez`, `ffmpeg`, and `v4l-utils`, run `privileged` with host networking, the host D-Bus socket mounted, and the host's whole `/dev` bind-mounted (so any `/dev/videoN` is reachable, including hotplugged capture cards). nuxbt talks to BlueZ over D-Bus and needs all of that; the Bluetooth adapter has no device node to pass through.
 
 The image also installs neovim, which is not a project dependency: `devcontainer-cli.nvim` connects by quitting the host editor and running `nvim` *inside* the container, so the binary has to be present or the connect silently collapses into "the editor just quit". Don't remove it as unused. It is pinned via the `NVIM_VERSION` build arg and should track the host version.
 
 The base image must stay on trixie or newer. nuxbt pulls in `pygobject`, which is sdist-only and builds against `girepository-2.0` requiring **glib >= 2.80**; bookworm ships glib 2.74, so a bookworm base cannot satisfy it. An earlier iteration tried to bridge that by adding Debian sid to `sources.list.d/` plus `apt-get dist-upgrade` and `--force-overwrite`; that mixed-suite setup broke and was removed. Do not reintroduce it — bump the base image instead. The relevant build deps are `libgirepository-2.0-dev` (note: *not* `libgirepository-1.0-dev`, which is the legacy introspection package and only needed by pygobject's test subproject) and `libcairo2-dev` for `pycairo`.
 
-`FFMPEG_INPUT_DEVICE` in `config.py` must match the device the capture card actually exposes, and that node must also be listed under `devices:` in `.devcontainer/docker-compose.yml`. These drift apart in practice — check both before debugging a "stream failed" error. Detecting the node automatically is an open TODO in `README.md`.
+Pairing requires the **host's** `bluetoothd` to run with `--compat --noplugin=*`; otherwise BlueZ's input plugin takes the Switch's incoming HID connection and the bot hangs silently at "Put your Switch in 'Pair New Controllers' mode". nuxbt no longer applies this automatically (the `toggle_clean_bluez` call is commented out), and `nuxbt toggle` can't do it from inside the container because systemd lives on the host. Apply it on the host via `/run/systemd/system/bluetooth.service.d/nuxbt.conf` (`[Service]`, empty `ExecStart=`, then `ExecStart=/usr/libexec/bluetooth/bluetoothd --compat --noplugin=*`), then `systemctl daemon-reload && systemctl restart bluetooth`. It lives in `/run`, so it is gone after every reboot, and it disables the host's other Bluetooth devices while active. The empty file at the same path in the Dockerfile is only a marker that satisfies nuxbt's CLI check.
+
+`FFMPEG_INPUT_DEVICE` in `config.py` must match the node the capture card actually exposes; node numbers change with what else is attached, so check `v4l2-ctl --list-devices` before debugging a "stream failed" error. Detecting the node automatically is an open TODO in `README.md`.
 
 ## Architecture
 
@@ -38,7 +40,7 @@ The base image must stay on trixie or newer. nuxbt pulls in `pygobject`, which i
 
 - `capture/` — `FrameCaptureManager` spawns FFmpeg (`v4l2` → downscale to 640×360 → `bgr24` rawvideo on stdout) and a daemon reader thread that keeps only the **latest** frame under a lock. `get_frame()` returns a copy. There is no frame queue; analysis always sees the newest frame, and a watchdog thread in `switchBot.py` restarts FFmpeg if the process dies.
 - `controller/` — `ControllerManager` wraps nuxbt: `bluetoothctl` setup, controller creation/pairing, reconnect (via `get_switch_addresses()`), and name→`Buttons` mapping. `press_buttons()` blocks until the macro completes, then sleeps an extra `delay`. `cleanup()` force-terminates nuxbt's child processes to avoid an `atexit` assertion on shutdown.
-- `processing/` — `ImageAnalyzer`, all static methods. Every detector is the same pipeline: crop by normalized (0–1) region → grayscale → Gaussian blur → binary threshold → *percentage of white pixels* compared against a threshold. **Polarity is not uniform**: `check_encounter_loaded`, `check_shiny_early_detection`, and `check_shiny_summary_star` invert the comparison (low white % means the thing is present), while the encounter-in-progress and battle checks do not. Read the specific method before adjusting a number.
+- `processing/` — `ImageAnalyzer`, all static methods. Every detector is the same pipeline: crop by normalized (0–1) region → grayscale → Gaussian blur → binary threshold → *percentage of white pixels* compared against a threshold. **Polarity is not uniform**: `check_encounter_started` (black-screen transition, used by the `encounter` event), `check_shiny_early_detection`, and `check_shiny_summary_star` invert the comparison (low white % means the thing is present), while `check_encounter_loaded` (battle scene faded in, polled after a `loop` block) and the battle check do not. Read the specific method before adjusting a number.
 - `game/` — `SequenceLoader`/`Sequence` (CSV loading + event validation) and `GameMacroExecutor` (hardcoded multi-press macros: `start_game`, `reset_position`, `save_game`). `reset_position` is a fragile chain of `Timings.RESET_POSITION_PHASE_*` sleeps with small random jitter; its purpose is soft-resetting the game back to the hunting spot.
 - `config.py` — the single tuning surface: crop regions, thresholds, and every timing constant. Prefer changing values here over hardcoding them in the modules.
 
@@ -48,7 +50,11 @@ The base image must stay on trixie or newer. nuxbt pulls in `pygobject`, which i
 
 - **buttons**: `a b x y up down left right l r zl zr plus minus home capture`
 - **floats**: `2.4` → `time.sleep(2.4)`
-- **events**: `loop`/`end` (repeat the enclosed tokens until an `encounter` check inside the block succeeds, max 50 iterations), `encounter` (black-screen detection), `battle` (poll until battle UI appears), `check` (early-animation shiny check), `summary` (shiny star on the summary screen), `reset` (run `reset_position`)
+- **events**: `loop`/`end` (repeat the enclosed tokens until an `encounter` check inside the block succeeds; after 50 fruitless iterations it reconnects the controller, runs `reset_position`, and keeps looping), `encounter` (black-screen detection; only meaningful inside a `loop` — outside one it is just warned about), `battle` (poll until battle UI appears), `check` (early-animation shiny check), `summary` (shiny star on the summary screen), `reset` (run `reset_position`)
+
+After a `loop` block succeeds, `hunt_shiny()` polls `check_encounter_loaded` until the battle scene has faded in (gives up after `Timings.ENCOUNTER_LOAD_TIMEOUT`), then resumes at the token after `end` — the block's tokens are not executed a second time.
+
+Every button is held for `BUTTON_PRESS_DURATION` (0.2 s), which is long enough for a direction to take a step rather than just turn the character.
 
 The interpreter is inline in `hunt_shiny()` in `switchBot.py` — a token that is neither a known event nor parseable as a float falls through to a button lookup, and unknown tokens are only warned about. Adding a new event means touching three places: `SequenceEventType` in `config.py` (validation), `Sequence._get_valid_buttons`/`_validate_events` if it is button-like, and the dispatch chain in `hunt_shiny()`.
 
@@ -69,7 +75,9 @@ This fix originated in this project as a local patch to a vendored copy under `v
 ## Known rough edges
 
 - `save_highlight()` concatenates `shinyFound*.ts` segments, but the current FFmpeg command only pipes rawvideo and never writes those segments (`ROLLING_FILE` is unused) — it always logs "No video segments found".
-- `check_if_in_encounter()` in `switchBot.py` reads the crop region as `Timings.__dict__["CropRegions.ENCOUNTER_DETECTION"]`, which raises `KeyError` on the debug save path.
-- `RTSP_URL` in `config.py` is vestigial; `README.md`'s RTSP instructions predate the switch to direct v4l2 capture.
-- `GameMacroExecutor.wait_for_encounter_load()` is a stub that just sleeps for 30 seconds.
-- `README.md`'s TODO list is in German and is the closest thing to a roadmap.
+- `RTSP_URL` in `config.py` is vestigial (capture is direct v4l2 now).
+- `GameMacroExecutor.wait_for_encounter_load()` is an unused stub that just sleeps for 30 seconds; the real wait is inline in `hunt_shiny()`.
+- The black game-loading screen satisfies `check_encounter_started`, so an `encounter` check right after `start_game` can fire falsely.
+- Harmless startup noise: `Failed to register agent object` (nuxbt registers its own BlueZ agent before `setup_bluetooth` runs) and an `UnknownObject` traceback from nuxbt's `connection_reset_watchdog` thread (a device vanished mid-scan; pairing continues).
+- When detection behaviour looks wrong, compare against `7df276b` ("Before copilot refactoring"), the last single-file version. The refactor that followed swapped the two encounter checks, re-ran `loop` tokens after the block, and broke the 50-loop recovery — all since fixed, but it is the reference for intended behaviour.
+- `README.md`'s TODO list is the closest thing to a roadmap.

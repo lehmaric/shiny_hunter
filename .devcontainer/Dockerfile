@@ -1,7 +1,9 @@
 FROM ghcr.io/astral-sh/uv:python3.12-trixie
 
-# nuxbt needs bluetoothd started without the systemd sandboxing that blocks
-# raw HID access; an empty override file disables the upstream hardening.
+# Marker only: nuxbt's CLI (`nuxbt test`, `demo`, `webapp`, ...) refuses to run
+# unless this file exists. It changes nothing here — the container has no
+# systemd. The real override (bluetoothd --compat --noplugin=*) must be applied
+# on the HOST, under the same path, or pairing hangs. switchBot.py doesn't check.
 RUN mkdir -p /run/systemd/system/bluetooth.service.d/ && \
 	touch /run/systemd/system/bluetooth.service.d/nuxbt.conf
 

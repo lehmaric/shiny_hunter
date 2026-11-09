@@ -50,7 +50,7 @@ PREVIEW_FPS = 12
 FFMPEG_INPUT_FORMAT = "mjpeg"
 FFMPEG_INPUT_SIZE = "1920x1080"
 FFMPEG_INPUT_FPS = 60
-FFMPEG_INPUT_DEVICE = "/dev/video10"
+FFMPEG_INPUT_DEVICE = "/dev/video14"
 
 # ============================================================================
 # OUTPUT & LOGGING
@@ -109,6 +109,7 @@ class Timings:
     
     ENCOUNTER_LOAD_POLL_INTERVAL = 0.02
     ENCOUNTER_LOAD_WAIT_AFTER = 1.4
+    ENCOUNTER_LOAD_TIMEOUT = 10  # Give up waiting for the battle scene (likely a false encounter)
     
     SHINY_FOUND_SCREENSHOT_1 = 0.2
     SHINY_FOUND_CONTROLLER_DISCONNECT = 2
@@ -151,8 +152,8 @@ class ImageThresholds:
     UI_ELEMENTS = 120         # For UI detection
     SHINY_INDICATOR = 130     # For early shiny detection
     SHINY_STAR = 240          # For summary screen star
-    ENCOUNTER_BLUE_FILTER = 50  # For encounter screen blue
-    ENCOUNTER_LOAD_CHECK = 75   # For encounter loaded black check
+    ENCOUNTER_BLACK = 50        # Encounter transition: pixels above this count as 'not black'
+    ENCOUNTER_LOAD_CHECK = 75   # Battle scene faded in: pixels above this count as bright
 
 
 # ============================================================================
@@ -160,9 +161,9 @@ class ImageThresholds:
 # ============================================================================
 class DetectionThresholds:
     """Percentage thresholds for pixel-based detection."""
-    ENCOUNTER_NOT_LOADED = 0.1          # Low white % = loaded
+    ENCOUNTER_BLACK_MAX = 0.1           # Low white % = screen black = encounter started
     BATTLE_LOADED = 0.25                # High white % = UI present
-    ENCOUNTER_LOADED = 0.4              # High white % = loaded
+    ENCOUNTER_LOADED = 0.4              # High white % = battle scene loaded
     SHINY_NOT_DETECTED = 0.015          # Low white % = shiny
     SUMMARY_STAR_DETECTED = 0.8         # High white % = star visible
 

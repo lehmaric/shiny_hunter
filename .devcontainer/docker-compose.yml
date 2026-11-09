@@ -1,14 +1,8 @@
-version: '3.8'
-
 services:
   devcontainer:
     build:
       context: ..
       dockerfile: ./.devcontainer/Dockerfile
-    devices:
-      - /dev/hci0:/dev/hci0
-      - /dev/video14:/dev/video14
-      - /dev/video15:/dev/video15
 #    ports:
 #      - "8765:8765"
     volumes:
@@ -16,6 +10,9 @@ services:
       - ~/.ssh:/root/.ssh:ro
       - /var/run/dbus:/var/run/dbus
       - /run/dbus:/run/dbus
+      # Whole host /dev, so capture cards are visible whatever node number they get,
+      # including ones plugged in after the container started. Requires privileged.
+      - /dev:/dev
     command: sleep infinity
     privileged: true
     network_mode: host 

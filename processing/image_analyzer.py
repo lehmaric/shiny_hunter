@@ -92,35 +92,35 @@ class ImageAnalyzer:
         return percentage > detection_threshold
 
     @staticmethod
-    def check_encounter_loaded(image: np.ndarray) -> bool:
-        """Detect if encounter screen has fully loaded.
+    def check_encounter_started(image: np.ndarray) -> bool:
+        """Detect the encounter transition: the screen has gone black.
+
+        Used by the `encounter` sequence event while walking in the grass.
 
         Args:
             image: Current frame.
 
         Returns:
-            True if encounter is loaded and visible.
+            True if the screen is (nearly) black.
         """
         crop = ImageAnalyzer.crop_frame(image, *CropRegions.ENCOUNTER_DETECTION)
-        binary = ImageAnalyzer.threshold_process(crop, ImageThresholds.ENCOUNTER_BLUE_FILTER)
-        # Low white = loaded (screen goes dark)
-        loaded = not ImageAnalyzer.threshold_detect(binary, DetectionThresholds.ENCOUNTER_NOT_LOADED)
-        return loaded
+        binary = ImageAnalyzer.threshold_process(crop, ImageThresholds.ENCOUNTER_BLACK)
+        # Inverted: low white % = screen went black = encounter started
+        return not ImageAnalyzer.threshold_detect(binary, DetectionThresholds.ENCOUNTER_BLACK_MAX)
 
     @staticmethod
-    def check_encounter_in_progress(image: np.ndarray) -> bool:
-        """Detect if player is in an active encounter.
+    def check_encounter_loaded(image: np.ndarray) -> bool:
+        """Detect that the battle scene has faded in after the black transition.
 
         Args:
             image: Current frame.
 
         Returns:
-            True if encounter screen detected.
+            True if the screen centre is bright again.
         """
         crop = ImageAnalyzer.crop_frame(image, *CropRegions.ENCOUNTER_LOAD_CHECK)
         binary = ImageAnalyzer.threshold_process(crop, ImageThresholds.ENCOUNTER_LOAD_CHECK)
-        in_encounter = ImageAnalyzer.threshold_detect(binary, DetectionThresholds.ENCOUNTER_LOADED)
-        return in_encounter
+        return ImageAnalyzer.threshold_detect(binary, DetectionThresholds.ENCOUNTER_LOADED)
 
     @staticmethod
     def check_battle_started(image: np.ndarray) -> bool:

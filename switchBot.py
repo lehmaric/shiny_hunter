@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 import cv2
 
 from config import (
-    DEBUGGING, OUTPUT_DIR, DEBUG_DIR, Timings, SKIP_BLUETOOTH_SETUP,
+    DEBUGGING, OUTPUT_DIR, DEBUG_DIR, Timings, CropRegions, SKIP_BLUETOOTH_SETUP,
     LIVE_PREVIEW, PREVIEW_PORT, FRAME_WIDTH, FRAME_HEIGHT
 )
 from capture import FrameCaptureManager
@@ -281,10 +281,10 @@ def check_if_in_encounter(frame) -> bool:
         bool: True if in encounter.
     """
     analyzer = ImageAnalyzer()
-    in_encounter = analyzer.check_encounter_in_progress(frame)
+    in_encounter = analyzer.check_encounter_started(frame)
     if in_encounter:
         save_frame("encounter_original", frame)
-        save_frame("encounter_crop", analyzer.crop_frame(frame, *Timings.__dict__["CropRegions.ENCOUNTER_DETECTION"]))
+        save_frame("encounter_crop", analyzer.crop_frame(frame, *CropRegions.ENCOUNTER_DETECTION))
         logger.info("Encounter detected")
     return in_encounter
 
@@ -408,7 +408,11 @@ def hunt_shiny(sequence: Sequence) -> None:
 
     macros.start_game()
     while not shiny_found:
+        resume_idx = 0  # tokens inside a loop/end block are consumed by the block itself
         for event_idx, event in enumerate(sequence.events):
+            if event_idx < resume_idx:
+                continue
+
             if event == "loop":
                 # Find matching end
                 end_idx = None
@@ -423,11 +427,12 @@ def hunt_shiny(sequence: Sequence) -> None:
 
                 # Execute loop until encounter
                 loop_events = sequence.events[event_idx + 1 : end_idx]
+                resume_idx = end_idx + 1
                 encounter_started = False
                 max_loops = 50
                 loop_count = 0
 
-                while not encounter_started and loop_count < max_loops:
+                while not encounter_started:
                     for loop_event in loop_events:
                         if loop_event == sequence.block_direction:
                             continue  # Skip blocked directions
@@ -450,19 +455,31 @@ def hunt_shiny(sequence: Sequence) -> None:
 
                     loop_count += 1
 
-                if loop_count >= max_loops:
-                    logger.warning("Max loops exceeded, attempting reconnect...")
-                    try:
-                        reconnect_controller()
-                        macros.reset_position()
-                        loop_count = 0
-                    except Exception as e:
-                        logger.error(f"Reconnect failed: {e}")
-                        quit_program()
+                    # No encounter for a long time: the controller probably dropped.
+                    # Reconnect, reset, and keep walking (as the pre-refactor script did).
+                    if not encounter_started and loop_count >= max_loops:
+                        logger.warning("Max loops exceeded, attempting reconnect...")
+                        try:
+                            reconnect_controller()
+                            macros.reset_position()
+                            loop_count = 0
+                        except Exception as e:
+                            logger.error(f"Reconnect failed: {e}")
+                            quit_program()
+                            return
 
-                # Wait for encounter to load with light indicators
+                # Black transition seen; wait for the battle scene to fade in
                 time.sleep(Timings.ENCOUNTER_LOAD_WAIT_AFTER)
-                logger.debug("Encounter loaded, continuing...")
+                load_deadline = time.monotonic() + Timings.ENCOUNTER_LOAD_TIMEOUT
+                while True:
+                    frame = get_frame()
+                    if frame is not None and analyzer.check_encounter_loaded(frame):
+                        logger.info("Encounter loaded")
+                        break
+                    if time.monotonic() > load_deadline:
+                        logger.warning("Encounter did not load in time, continuing anyway")
+                        break
+                    time.sleep(Timings.ENCOUNTER_LOAD_POLL_INTERVAL)
 
             elif event == "battle":
                 logger.info("Waiting for battle UI...")
