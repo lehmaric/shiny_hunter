@@ -2,8 +2,6 @@
 
 A bot that hunts shiny Pokémon on a real Nintendo Switch. It pretends to be a Pro Controller over Bluetooth ([nuxbt](https://pypi.org/project/nuxbt/)), watches the console's HDMI output through a USB capture card, and uses simple OpenCV pixel thresholds to detect encounters and shinies. When it finds one, it disconnects so you can catch it yourself.
 
-It's a hobby project and somewhat janky — expect to tune timings for your setup.
-
 ## What you need
 
 - A Nintendo Switch (docked, HDMI out)

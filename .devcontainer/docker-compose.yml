@@ -13,6 +13,10 @@ services:
       # Whole host /dev, so capture cards are visible whatever node number they get,
       # including ones plugged in after the container started. Requires privileged.
       - /dev:/dev
+    environment:
+      # ssh as root rejects the mounted ~/.ssh/config (owned by the host user, uid 1000).
+      # Skip the config; keys and known_hosts are still picked up from /root/.ssh.
+      GIT_SSH_COMMAND: ssh -F /dev/null
     command: sleep infinity
     privileged: true
     network_mode: host 
